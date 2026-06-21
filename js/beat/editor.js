@@ -556,6 +556,22 @@ const Editor = {
         }
     },
 
+    getChartData() {
+        const gameNotes = this.state.notes.map(note => {
+            if (note.type === 'long_head') return { time: note.time, lane: note.lane, duration: note.duration };
+            if (note.type === 'tap') return { time: note.time, lane: note.lane };
+            return { time: note.time, lane: note.lane, type: note.type };
+        }).filter(note => note.type !== 'long_tail');
+        return {
+            songName: this.state.audioFileName || '',
+            bpm: this.state.bpm,
+            startTimeOffset: this.state.startTimeOffset,
+            laneCount: parseInt(DOM.editor.previewLanesSelector?.value) || 4,
+            notes: gameNotes.sort((a, b) => a.time - b.time),
+            triggers: this.state.triggers || [],
+        };
+    },
+
     saveChart() {
         try {
             if (!this.state.audioFileName) {

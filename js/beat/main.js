@@ -176,9 +176,30 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('back-to-menu-btn').addEventListener('click', () => {
             DOM.lanesContainer.innerHTML = '';
             resetPlayingScreenUI();
+            Game.state._onlineChartId = null;
             Game.state.gameState = 'menu';
             UI.showScreen('menu');
         });
+
+        // 온라인 라이브러리 버튼
+        document.getElementById('online-btn').addEventListener('click', () => {
+            Game.state.gameState = 'online';
+            Online.show('browse');
+        });
+
+        // 에디터 업로드 버튼
+        document.getElementById('editor-upload-btn').addEventListener('click', async () => {
+            const user = await CloudAuth.getUser();
+            if (!user) {
+                alert('로그인이 필요합니다. 우측 상단 계정 아이콘을 클릭해주세요.');
+                return;
+            }
+            UploadModal.open('upload');
+        });
+
+        // 업로드 모달 버튼
+        document.getElementById('upload-submit-btn').addEventListener('click', () => UploadModal.submit());
+        document.getElementById('upload-cancel-btn').addEventListener('click', () => UploadModal.close());
 
         document.getElementById('editor-btn').addEventListener('click', () => {
             // 화면 비율은 항상 3:2로 고정

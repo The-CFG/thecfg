@@ -21,6 +21,7 @@ const DOM = {
         result: document.getElementById('result-screen'),
         editor: document.getElementById('editor-screen'),
         settings: document.getElementById('settings-screen'),
+        online: document.getElementById('online-screen'),
     },
     messages: {
         menu: document.getElementById('menu-message'),

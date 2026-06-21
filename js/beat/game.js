@@ -26,6 +26,7 @@ const Game = {
         notes: [],
         score: 0,
         combo: 0,
+        maxCombo: 0,
         judgements: { perfect: 0, good: 0, bad: 0, miss: 0 },
         gameStartTime: 0,
         animationFrameId: null,
@@ -43,6 +44,7 @@ const Game = {
     resetState() {
         this.state.score = 0;
         this.state.combo = 0;
+        this.state.maxCombo = 0;
         this.state.judgements = { perfect: 0, good: 0, bad: 0, miss: 0 };
         this.state.processedNotes = 0;
         this.state.isPaused = false;
@@ -152,6 +154,17 @@ const Game = {
             resetPlayingScreenUI();
             UI.updateResultScreen();
             UI.showScreen('result');
+
+            // 온라인 차트 플레이인 경우 점수 제출
+            if (this.state._onlineChartId) {
+                const resultEl = document.getElementById('online-score-result');
+                if (resultEl) {
+                    resultEl.textContent = '점수 등록 중…';
+                    resultEl.className = 'text-sm text-gray-400 mt-2';
+                    resultEl.classList.remove('hidden');
+                }
+                submitOnlineScore().catch(() => {});
+            }
         } catch (err) {
             Debugger.logError(err, 'Game.end');
         }
@@ -361,8 +374,10 @@ const Game = {
         this.state.score += CONFIG.POINTS[judgement];
         if (judgement === 'miss' || judgement === 'bad') {
             this.state.combo = 0;
+        this.state.maxCombo = 0;
         } else {
             this.state.combo++;
+            if (this.state.combo > this.state.maxCombo) this.state.maxCombo = this.state.combo;
             if (note.type === 'long_head') {
                 // 롱노트 헤드가 성공적으로 판정되면 수축 시작
                 note.shrinking = true;
