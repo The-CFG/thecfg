@@ -410,6 +410,11 @@ const Game = {
                 headNote.element.remove();
                 headNote.element = null;
             }
+        } else if (note.type === 'long_head') {
+            if (note.element) { note.element.remove(); note.element = null; }
+            // 대응하는 tail도 processed 처리 (카운트 없이)
+            const tailNote = this.state.notes.find(n => n.noteId === note.noteId && n.type === 'long_tail');
+            if (tailNote) tailNote.processed = true;
         } else if ((note.type === 'tap' || note.type === 'false') && note.element) {
             note.element.remove();
             note.element = null;
@@ -445,8 +450,15 @@ const Game = {
                 judgement = (judgement === 'miss') ? 'perfect' : 'miss';
             }
             if (judgement === 'miss' && note.time > 0) {
-                const notesAtSameTime = this.state.notes.filter(n => !n.processed && n.time === note.time && n.type !== 'false');
-                notesAtSameTime.forEach(n => this._processSingleJudgement('miss', n));
+                // 같은 타임의 일반 tap 노트만 함께 처리 — 롱노트는 개별 판정
+                const notesAtSameTime = this.state.notes.filter(n =>
+                    !n.processed && n.time === note.time && n.type === 'tap'
+                );
+                if (notesAtSameTime.length > 0) {
+                    notesAtSameTime.forEach(n => this._processSingleJudgement('miss', n));
+                } else {
+                    this._processSingleJudgement('miss', note);
+                }
                 Audio.playMissSound();
                 UI.showJudgementFeedback('MISS', 0);
                 UI.updateScoreboard();
