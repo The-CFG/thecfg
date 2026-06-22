@@ -27,7 +27,7 @@ const CloudScores = {
     async getLeaderboard(chartId, limit = 10) {
         const { data, error } = await _supabase
             .from('beat_scores')
-            .select('user_id, score, accuracy, max_combo, achieved_at')
+            .select('user_id, score, accuracy, max_combo, judge_perfect, judge_good, judge_miss, achieved_at')
             .eq('chart_id', chartId)
             .order('score', { ascending: false })
             .limit(limit);
@@ -48,7 +48,7 @@ const CloudScores = {
 
         const { data, error } = await _supabase
             .from('beat_scores')
-            .select('score, accuracy, max_combo, achieved_at')
+            .select('score, accuracy, max_combo, judge_perfect, judge_good, judge_miss, achieved_at')
             .eq('chart_id', chartId)
             .eq('user_id', user.id)
             .single();
