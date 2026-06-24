@@ -101,7 +101,9 @@ const Game = {
             ctx.strokeStyle = this.LANE_BORDER_COLOR;
             ctx.lineWidth = 1;
             for (let i = 0; i <= laneCount; i++) {
-                const x = i * laneW + 0.5;
+                // 마지막 선(i === laneCount)은 canvas 오른쪽 끝과 겹쳐 잘리므로
+                // 0.5px 안쪽으로 당겨서 완전히 표시되게 한다
+                const x = (i === laneCount) ? this.w - 0.5 : i * laneW + 0.5;
                 ctx.beginPath();
                 ctx.moveTo(x, 0);
                 ctx.lineTo(x, this.h);
