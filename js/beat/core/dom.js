@@ -1,6 +1,7 @@
 const DOM = {
     gameArea: document.getElementById('game-area'),
     uiArea: document.getElementById('ui-area'),
+    gameCanvas: document.getElementById('game-canvas'),
     lanesContainer: document.getElementById('lanes-container'),
     scoreEl: document.getElementById('score'),
     comboEl: document.getElementById('combo'),

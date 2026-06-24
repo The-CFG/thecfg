@@ -455,6 +455,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 Editor.drawTimeline();
                 Editor.renderNotes();
             }
+            // 게임 중이거나 카운트다운 중일 때 canvas 크기 재동기화
+            const activeGameStates = ['playing', 'countdown'];
+            if (activeGameStates.includes(Game.state.gameState) && Game.canvas.ctx) {
+                Game.canvas.resize(Game.state.settings.lanes);
+            }
         });
 
         DOM.editor.audioFileInput.addEventListener('change', (e) => Editor.handleAudioLoad(e));

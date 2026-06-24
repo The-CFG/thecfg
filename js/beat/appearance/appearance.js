@@ -387,12 +387,12 @@ const Appearance = {
     },
 
     forceUpdateNotes() {
-        // 게임 중이거나 에디터 중일 때 기존 노트들의 스타일을 강제로 업데이트
+        // Canvas 기반 게임 노트는 매 프레임 Appearance 설정을 참조하므로 별도 업데이트 불필요.
+        // 에디터 노트(DOM 기반)만 스타일 강제 갱신한다.
         try {
-            const notes = document.querySelectorAll('.note, .editor-note');
-            notes.forEach(noteEl => {
+            const editorNotes = document.querySelectorAll('.editor-note');
+            editorNotes.forEach(noteEl => {
                 if (this.settings.colorMode === 'lane') {
-                    // 레인별 색상 모드
                     const lane = noteEl.dataset.lane;
                     if (lane && this.settings.laneColors[lane]) {
                         const color = this.settings.laneColors[lane];
@@ -407,7 +407,6 @@ const Appearance = {
                         }
                     }
                 } else {
-                    // 노트 타입별 색상 모드
                     if (noteEl.classList.contains('long')) {
                         const gradientStart = this.adjustColor(this.settings.colors.long, -20);
                         noteEl.style.background = `linear-gradient(to top, ${gradientStart}, ${this.settings.colors.long})`;

@@ -41,6 +41,226 @@ const Game = {
         chartData: null,
     },
 
+    // ─── Canvas 렌더러 ───────────────────────────────────────────────────────
+    canvas: {
+        el: null,   // <canvas> 엘리먼트
+        ctx: null,  // 2D 컨텍스트
+        w: 0,       // 현재 캔버스 너비
+        h: 0,       // 현재 캔버스 높이
+
+        LANE_BORDER_COLOR: '#4a5568',
+        JUDGEMENT_LINE_Y_FROM_BOTTOM: 100, // 판정선 하단 여백(px)
+        JUDGEMENT_LINE_H: 4,
+        NOTE_BAR_H: 25,
+        NOTE_CIRCLE_D: 90,  // 원형 노트 지름
+        NOTE_RADIUS: 5,     // 바 노트 모서리 둥글기
+
+        init() {
+            this.el = DOM.gameCanvas;
+            this.ctx = this.el.getContext('2d');
+        },
+
+        // 레인 수·게임 영역 크기에 맞게 캔버스 크기 동기화
+        resize(laneCount) {
+            const laneW = 100;
+            this.w = laneCount * laneW;
+            this.h = DOM.lanesContainer.clientHeight || DOM.gameArea.clientHeight;
+            // devicePixelRatio 반영으로 Retina/모바일 선명하게
+            const dpr = window.devicePixelRatio || 1;
+            this.el.width  = this.w * dpr;
+            this.el.height = this.h * dpr;
+            this.el.style.width  = `${this.w}px`;
+            this.el.style.height = `${this.h}px`;
+            this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        },
+
+        // 판정선 Y 좌표 (상단 기준)
+        judgementLineY() {
+            return this.h - this.JUDGEMENT_LINE_Y_FROM_BOTTOM;
+        },
+
+        // 노트 색상 결정 (Appearance 설정 반영)
+        _noteColor(noteType, laneId, isLong) {
+            const ap = Appearance.settings;
+            if (ap.colorMode === 'lane' && laneId && ap.laneColors[laneId]) {
+                return ap.laneColors[laneId];
+            }
+            if (noteType === 'long_head' || isLong) return ap.colors.long;
+            if (noteType === 'false') return ap.colors.false;
+            return ap.colors.tap;
+        },
+
+        // 레인 배경(경계선) + 판정선 그리기
+        drawLaneBackground(laneCount, activeLanes) {
+            const ctx = this.ctx;
+            const laneW = 100;
+            const jY = this.judgementLineY();
+            const isCircle = document.body.classList.contains('circle-notes');
+
+            // 레인 구분선
+            ctx.strokeStyle = this.LANE_BORDER_COLOR;
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= laneCount; i++) {
+                const x = i * laneW + 0.5;
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, this.h);
+                ctx.stroke();
+            }
+
+            // 활성 레인 피드백
+            ctx.fillStyle = 'rgba(255,255,255,0.1)';
+            for (let i = 0; i < laneCount; i++) {
+                if (activeLanes[i]) {
+                    ctx.fillRect(i * laneW + 1, 0, laneW - 2, this.h);
+                }
+            }
+
+            // 판정선
+            if (isCircle) {
+                // 원형 노트: 레인마다 원형 판정선
+                for (let i = 0; i < laneCount; i++) {
+                    const cx = i * laneW + laneW / 2;
+                    const cy = jY - this.NOTE_CIRCLE_D / 2;
+                    const r = this.NOTE_CIRCLE_D / 2;
+                    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+                    grad.addColorStop(0, 'rgba(255,255,255,0.8)');
+                    grad.addColorStop(0.5, 'rgba(255,255,255,0.4)');
+                    grad.addColorStop(1, 'rgba(255,255,255,0.1)');
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            } else {
+                // 바 노트: 전체 너비 가로선
+                const totalW = laneCount * laneW;
+                const grad = ctx.createLinearGradient(0, 0, totalW, 0);
+                grad.addColorStop(0,   'rgba(255,255,255,0.2)');
+                grad.addColorStop(0.5, 'rgba(255,255,255,0.8)');
+                grad.addColorStop(1,   'rgba(255,255,255,0.2)');
+                ctx.fillStyle = grad;
+                ctx.shadowColor = '#fff';
+                ctx.shadowBlur  = 10;
+                ctx.fillRect(0, jY, totalW, this.JUDGEMENT_LINE_H);
+                ctx.shadowBlur = 0;
+            }
+        },
+
+        // 노트 한 개 그리기
+        drawNote(note, laneIdMapping, noteSpeed) {
+            if (note.processed && !note._visible) return;
+
+            const ctx = this.ctx;
+            const laneW = 100;
+            const laneIndex = note.lane;
+            const laneId = laneIdMapping ? laneIdMapping[laneIndex] : null;
+            const isCircle = document.body.classList.contains('circle-notes');
+            const jY = this.judgementLineY();
+
+            const color = this._noteColor(note.type, laneId, note.type === 'long_head');
+            const darkerColor = Appearance.adjustColor(color, -20);
+
+            if (isCircle) {
+                const D = this.NOTE_CIRCLE_D;
+                const R = D / 2;
+                const cx = laneIndex * laneW + laneW / 2;
+
+                if (note.type === 'long_head') {
+                    // 롱노트(원형): 캡슐 형태
+                    const bodyH = note._drawH ?? D;
+                    const topY  = note._drawTop ?? (jY - bodyH);
+                    const grad = ctx.createLinearGradient(cx - R, topY + bodyH, cx - R, topY);
+                    grad.addColorStop(0, darkerColor);
+                    grad.addColorStop(1, color);
+                    ctx.fillStyle = grad;
+                    // 캡슐: 직사각형 + 상단 반원 + 하단 반원
+                    ctx.beginPath();
+                    ctx.arc(cx, topY + R,        R, Math.PI, 0);          // 상단 반원
+                    ctx.lineTo(cx + R, topY + bodyH - R);
+                    ctx.arc(cx, topY + bodyH - R, R, 0, Math.PI);         // 하단 반원
+                    ctx.closePath();
+                    ctx.fill();
+                } else if (note.type !== 'long_tail') {
+                    // 탭/false 원형
+                    const topY = note._drawTop ?? (jY - D);
+                    const cy = topY + R;
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+                    if (note.type === 'false') {
+                        ctx.fillStyle = color;
+                        ctx.fill();
+                        ctx.shadowColor = color;
+                        ctx.shadowBlur  = 12;
+                        ctx.fill();
+                        ctx.shadowBlur  = 0;
+                    } else {
+                        ctx.fillStyle = color;
+                        ctx.fill();
+                    }
+                }
+            } else {
+                // 바(bar) 노트
+                const x = laneIndex * laneW + 1;
+                const w = laneW - 2;
+
+                if (note.type === 'long_head') {
+                    const bodyH  = note._drawH ?? this.NOTE_BAR_H;
+                    const topY   = note._drawTop ?? (jY - bodyH);
+                    const grad = ctx.createLinearGradient(x, topY + bodyH, x, topY);
+                    grad.addColorStop(0, darkerColor);
+                    grad.addColorStop(1, color);
+                    ctx.fillStyle = grad;
+                    ctx.globalAlpha = 0.9;
+                    this._roundRect(ctx, x, topY, w, bodyH, this.NOTE_RADIUS);
+                    ctx.fill();
+                    ctx.globalAlpha = 1;
+                } else if (note.type !== 'long_tail') {
+                    const topY = note._drawTop ?? (jY - this.NOTE_BAR_H);
+                    ctx.fillStyle = color;
+                    if (note.type === 'false') {
+                        ctx.shadowColor = color;
+                        ctx.shadowBlur  = 8;
+                    }
+                    this._roundRect(ctx, x, topY, w, this.NOTE_BAR_H, this.NOTE_RADIUS);
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                }
+            }
+        },
+
+        // 둥근 사각형 path 헬퍼 (Path2D 미지원 구형 브라우저 대응)
+        _roundRect(ctx, x, y, w, h, r) {
+            r = Math.min(r, w / 2, h / 2);
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.arcTo(x + w, y,     x + w, y + r,     r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+            ctx.lineTo(x + r, y + h);
+            ctx.arcTo(x,     y + h, x,     y + h - r, r);
+            ctx.lineTo(x,     y + r);
+            ctx.arcTo(x,     y,     x + r, y,         r);
+            ctx.closePath();
+        },
+
+        // 매 프레임 전체 씬 렌더링
+        render(notes, laneCount, activeLanes, laneIdMapping) {
+            const ctx = this.ctx;
+            ctx.clearRect(0, 0, this.w, this.h);
+            this.drawLaneBackground(laneCount, activeLanes);
+            // 뒤(오래된 노트)→앞(새 노트) 순으로 그려야 겹침이 자연스럽다
+            for (let i = 0; i < notes.length; i++) {
+                const note = notes[i];
+                if (note._visible) {
+                    this.drawNote(note, laneIdMapping, null);
+                }
+            }
+        },
+    },
+    // ────────────────────────────────────────────────────────────────────────
+
     resetState() {
         this.state.score = 0;
         this.state.combo = 0;
@@ -110,6 +330,11 @@ const Game = {
         }
 
         this.setupLanes();
+
+        // Canvas 초기화 (레인 생성 후 크기 확정)
+        this.canvas.init();
+        this.canvas.resize(this.state.settings.lanes);
+
         UI.showScreen('playing');
         UI.updateScoreboard();
         this.state.gameState = 'countdown';
@@ -124,32 +349,23 @@ const Game = {
             }
 
             // Fix 1: 카운트다운 중에 오디오 시스템을 선행 워밍업
-            // seek + play→pause 로 모바일 오디오 초기화 비용을 게임 시작 전에 미리 지불.
-            // 이렇게 하면 게임 시작 시 play()가 거의 즉시 반환되어 메인 스레드 블로킹이 없어진다.
             DOM.musicPlayer.currentTime = this.state.settings.startTimeOffset;
             DOM.musicPlayer.play().then(() => {
                 DOM.musicPlayer.pause();
                 DOM.musicPlayer.currentTime = this.state.settings.startTimeOffset;
-            }).catch(() => {}); // autoplay 정책에 걸려도 무시 (게임 시작 시 다시 시도)
+            }).catch(() => {});
         }
 
-        // 카운트다운 시간 = 3,2,1,START! 총 4틱 × 1000ms
         const COUNTDOWN_DURATION_MS = 4000;
-
-        // gameStartTime을 4초 뒤로 설정: 카운트다운 동안 elapsedTime이 음수가 되어
-        // 노트들이 화면 위쪽에서부터 자연스럽게 흘러 내려오기 시작한다.
         this.state.gameStartTime = performance.now() + COUNTDOWN_DURATION_MS;
 
-        // 게임 루프를 카운트다운 시작과 동시에 구동
         this.loop(performance.now());
 
         this.runCountdown(() => {
             this.state.gameState = 'playing';
             if (this.state.settings.mode === 'music' && DOM.musicPlayer.src) {
-                // seek 비용은 이미 워밍업 단계에서 지불됨 — play()만 호출
                 DOM.musicPlayer.currentTime = this.state.settings.startTimeOffset;
                 DOM.musicPlayer.play().then(() => {
-                    // 오디오가 실제로 재생되기 시작하면 오디오 클럭 활성화 (Fix 2)
                     this.state.audioReady = true;
                 }).catch(() => {});
             }
@@ -168,8 +384,6 @@ const Game = {
 
             if (this.state.settings.mode === 'music' && DOM.musicPlayer.src) {
                 DOM.musicPlayer.pause();
-                // [핵심 수정] 오디오 플레이어의 내부 상태를 완전히 리셋하여
-                // 다음 플레이를 위해 깨끗한 상태로 만듭니다.
                 DOM.musicPlayer.load();
 
                 if (DOM.musicPlayer.src.startsWith('blob:')) {
@@ -177,12 +391,16 @@ const Game = {
                 }
             }
 
+            // Canvas 클리어
+            if (this.canvas.ctx) {
+                this.canvas.ctx.clearRect(0, 0, this.canvas.w, this.canvas.h);
+            }
+
             this.state.gameState = 'result';
             resetPlayingScreenUI();
             UI.updateResultScreen();
             UI.showScreen('result');
 
-            // 온라인 차트 플레이인 경우 점수 제출
             if (this.state._onlineChartId) {
                 const resultEl = document.getElementById('online-score-result');
                 if (resultEl) {
@@ -198,8 +416,6 @@ const Game = {
     },
 
     prepareNotesFromChartData() {
-        // [핵심 수정] JSON.parse(JSON.stringify(...))를 사용하여
-        // 원본 chartData와 완전히 분리된 '깊은 복사본'을 만듭니다.
         const chartData = JSON.parse(JSON.stringify(this.state.chartData));
 
         const playerLaneCount = this.state.settings.lanes;
@@ -208,12 +424,11 @@ const Game = {
         const processedNotes = [];
         let noteIdCounter = 0;
 
-        // 이제부터 사용하는 'note' 객체는 원본과 완전히 분리된 안전한 복사본입니다.
         chartData.notes.forEach(note => {
             const laneId = note.lane;
             const gameLaneIndex = requiredLaneIds.indexOf(laneId);
             if (gameLaneIndex !== -1) {
-                const newNoteBase = { time: note.time, lane: gameLaneIndex, processed: false, element: null };
+                const newNoteBase = { time: note.time, lane: gameLaneIndex, processed: false };
                 const type = note.type || 'tap';
                 if (note.duration) {
                     const noteId = noteIdCounter++;
@@ -238,17 +453,20 @@ const Game = {
             let elapsedTime;
 
             if (self.state.settings.mode === 'music' && self.state.audioReady) {
-                // 오디오가 실제로 재생 중일 때만 오디오 클럭 사용 (Fix 2: 클럭 전환 유예)
-                // play() 직후 currentTime이 아직 0인 몇 프레임 동안은 performance 클럭을 유지하여
-                // 노트 위치 점프(stuttering) 방지
                 elapsedTime = Math.max(0, (DOM.musicPlayer.currentTime - self.state.settings.startTimeOffset) * 1000);
             } else {
-                // 카운트다운 중, 랜덤 모드, 또는 오디오 미준비: performance 기반 클럭
-                // gameStartTime이 미래로 설정되어 있어 카운트다운 동안 음수값 → 노트가 화면 위에서 자연스럽게 하강
                 elapsedTime = timestamp - self.state.gameStartTime - self.state.totalPausedTime;
             }
 
             self.updateNotes(elapsedTime);
+
+            // Canvas 렌더
+            self.canvas.render(
+                self.state.notes,
+                self.state.settings.lanes,
+                self.state.activeLanes,
+                self.state.laneIdMapping
+            );
 
             if (self.state.processedNotes >= self.state.totalNotes && self.state.totalNotes > 0) {
                 setTimeout(() => self.end(), 500);
@@ -269,128 +487,82 @@ const Game = {
     updateNotes(elapsedTime) {
         try {
             Debugger.profileStart('Game.updateNotes');
-            const gameHeight = DOM.lanesContainer.clientHeight;
+            const gameHeight = this.canvas.h || DOM.lanesContainer.clientHeight;
             if (gameHeight === 0) return;
+
+            const isCircle = document.body.classList.contains('circle-notes');
+            const noteH    = isCircle ? this.canvas.NOTE_CIRCLE_D : this.canvas.NOTE_BAR_H;
+            const jY       = this.canvas.judgementLineY(); // 판정선 top Y
+
             for (let i = this.state.unprocessedNoteIndex; i < this.state.notes.length; i++) {
                 const note = this.state.notes[i];
-                if (note.processed && !note.element) {
+
+                // 이미 처리 완료되고 visible도 false면 인덱스 전진
+                if (note.processed && !note._visible) {
                     if (i === this.state.unprocessedNoteIndex) {
                         this.state.unprocessedNoteIndex++;
                     }
                     continue;
                 }
+
+                // long_head 처리 완료 → 롱노트 꼬리 미처리 감지
                 if (note.type === 'long_head' && note.processed) {
                     const tailNote = this.state.notes.find(n => n.noteId === note.noteId && n.type === 'long_tail');
                     if (tailNote && !tailNote.processed && !this.state.activeLanes[note.lane]) {
                         this.handleJudgement('miss', tailNote);
                     }
                 }
-                const timeToHit = note.time - elapsedTime;
-                const noteBottomPosition = gameHeight - 100 - (timeToHit * this.state.settings.noteSpeed / 10);
 
-                // notes는 시간 오름차순으로 정렬되어 있다. 아직 element도 없고
-                // 처리되지도 않은 노트인데 화면에 들어오려면 한참 남았다면
-                // (noteBottomPosition <= -50), 이후의 노트들은 시간상 전부 더
-                // 뒤이므로 화면에는 더더욱 멀리 있다는 뜻 — 더 볼 필요가 없다.
-                // 이 가지치기가 없으면 매 프레임 "남은 노트 전체"를 끝까지
-                // 훑게 되는데, 곡 시작 직후(unprocessedNoteIndex가 거의
-                // 줄지 않은 시점, 즉 남은 노트가 가장 많은 시점)에 부하가
-                // 최대가 되어 느린 기기(특히 모바일)에서 프레임이 밀리고,
-                // 음악은 정상 재생되는데 노트만 한두 박자 늦게 내려오는
-                // 현상으로 이어졌다.
-                if (!note.element && !note.processed && noteBottomPosition <= -50) {
+                const timeToHit = note.time - elapsedTime;
+                // 노트 하단 Y (판정선 기준: 0ms = jY, 음수 = 판정선 아래)
+                const noteBottomY = jY - (timeToHit * this.state.settings.noteSpeed / 10);
+
+                // 아직 화면 밖(위)이고 처리 안됐으면 이후 노트도 마찬가지 → 중단
+                if (!note._visible && !note.processed && noteBottomY <= -noteH) {
                     break;
                 }
 
-                const isLongNote = note.type === 'long_head';
-                
-                // 롱노트 높이 계산 시 최소 높이 적용
-                let noteHeight;
-                if (isLongNote) {
-                    const minHeight = document.body.classList.contains('circle-notes') ? 90 : 25;
-                    const calculatedHeight = (note.duration / 10) * this.state.settings.noteSpeed;
-                    noteHeight = Math.max(calculatedHeight, minHeight);
+                // 롱노트 높이 계산
+                let drawH;
+                if (note.type === 'long_head') {
+                    const minH = isCircle ? this.canvas.NOTE_CIRCLE_D : this.canvas.NOTE_BAR_H;
+                    drawH = Math.max((note.duration / 10) * this.state.settings.noteSpeed, minH);
                 } else {
-                    noteHeight = 25;
+                    drawH = noteH;
                 }
-                
-                const noteTopPosition = noteBottomPosition - noteHeight;
-                if (!note.element && !note.processed && (note.type === 'tap' || isLongNote || note.type === 'false')) {
-                    if (noteTopPosition < gameHeight && noteBottomPosition > -50) {
-                        const laneEl = DOM.lanesContainer.children[note.lane];
-                        if (laneEl) {
-                            note.element = document.createElement('div');
-                            note.element.className = 'note';
-                            
-                            // 레인 ID 저장 (레인별 색상 적용용)
-                            if (this.state.laneIdMapping && this.state.laneIdMapping[note.lane]) {
-                                note.element.dataset.lane = this.state.laneIdMapping[note.lane];
-                            }
-                            
-                            if (isLongNote) note.element.classList.add('long');
-                            if (note.type === 'false') note.element.classList.add('false');
-                            
-                            // 레인별 색상 모드일 때 인라인 스타일 적용
-                            if (Appearance.settings.colorMode === 'lane' && note.element.dataset.lane) {
-                                const laneId = note.element.dataset.lane;
-                                const color = Appearance.settings.laneColors[laneId];
-                                if (color) {
-                                    if (isLongNote) {
-                                        const gradientStart = Appearance.adjustColor(color, -20);
-                                        note.element.style.background = `linear-gradient(to top, ${gradientStart}, ${color})`;
-                                    } else {
-                                        note.element.style.backgroundColor = color;
-                                        if (note.type === 'false') {
-                                            note.element.style.boxShadow = `0 0 8px ${color}`;
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // 롱노트는 최소 높이 보장 (원형 노트 대응)
-                            if (isLongNote) {
-                                const minHeight = document.body.classList.contains('circle-notes') ? 90 : 25;
-                                note.element.style.height = `${Math.max(noteHeight, minHeight)}px`;
-                            }
-                            laneEl.appendChild(note.element);
-                        }
-                    }
-                }
-                if (note.element && note.element.isConnected) {
-                    // 롱노트가 판정되어 수축 중인 경우
-                    if (isLongNote && note.shrinking && note.tailTime) {
-                        const timeUntilTail = note.tailTime - elapsedTime;
-                        const currentDuration = Math.max(0, timeUntilTail);
-                        const calculatedHeight = (currentDuration / 10) * this.state.settings.noteSpeed;
-                        
-                        // 최소 높이 보장 (원형 노트 대응)
-                        const minHeight = document.body.classList.contains('circle-notes') ? 90 : 25;
-                        const newHeight = Math.max(calculatedHeight, minHeight);
-                        
-                        // 판정선 위치(gameHeight - 100)에 노트 하단을 고정
-                        const fixedBottomPosition = gameHeight - 100;
-                        const fixedTopPosition = fixedBottomPosition - newHeight;
-                        
-                        note.element.style.transform = `translateY(${fixedTopPosition}px)`;
-                        note.element.style.height = `${newHeight}px`;
-                        
-                        // 꼬리에 도달하면 제거
-                        if (timeUntilTail <= 0) {
-                            note.element.remove();
-                            note.element = null;
-                        }
+
+                const noteTopY = noteBottomY - drawH;
+
+                // 화면 안에 들어왔는지 여부
+                const inView = noteBottomY > -noteH && noteTopY < gameHeight;
+
+                if (!note.processed && (note.type === 'tap' || note.type === 'long_head' || note.type === 'false')) {
+                    if (inView) {
+                        note._visible = true;
+                        note._drawTop = noteTopY;
+                        note._drawH   = drawH;
                     } else {
-                        // 일반 노트 또는 수축 중이 아닌 롱노트
-                        note.element.style.transform = `translateY(${noteTopPosition}px)`;
-                        
-                        // 롱노트는 매 프레임 최소 높이 적용
-                        if (isLongNote && !note.shrinking) {
-                            const minHeight = document.body.classList.contains('circle-notes') ? 90 : 25;
-                            const currentHeight = Math.max(noteHeight, minHeight);
-                            note.element.style.height = `${currentHeight}px`;
-                        }
+                        note._visible = false;
                     }
                 }
+
+                // 롱노트 수축 처리 (헤드가 판정됐고 레인이 눌린 상태)
+                if (note.type === 'long_head' && note.shrinking && note.tailTime !== undefined) {
+                    const timeUntilTail = note.tailTime - elapsedTime;
+                    const currentDuration = Math.max(0, timeUntilTail);
+                    const minH = isCircle ? this.canvas.NOTE_CIRCLE_D : this.canvas.NOTE_BAR_H;
+                    const shrinkH = Math.max((currentDuration / 10) * this.state.settings.noteSpeed, minH);
+
+                    note._visible  = true;
+                    note._drawH    = shrinkH;
+                    note._drawTop  = jY - shrinkH; // 판정선에 하단 고정
+
+                    if (timeUntilTail <= 0) {
+                        note._visible = false;
+                    }
+                }
+
+                // MISS 판정
                 if (!note.processed && timeToHit < -CONFIG.JUDGEMENT_WINDOWS_MS.miss) {
                     this.handleJudgement('miss', note);
                 }
@@ -404,16 +576,14 @@ const Game = {
 
     _processSingleJudgement(judgement, note) {
         note.processed = true;
+        note._visible  = false;
+
         if (note.type === 'long_tail') {
+            // 헤드도 숨김 처리
             const headNote = this.state.notes.find(n => n.noteId === note.noteId && n.type === 'long_head');
-            if (headNote && headNote.element) {
-                headNote.element.remove();
-                headNote.element = null;
-            }
-        } else if ((note.type === 'tap' || note.type === 'false') && note.element) {
-            note.element.remove();
-            note.element = null;
+            if (headNote) headNote._visible = false;
         }
+
         this.state.judgements[judgement]++;
         if (note.type !== 'long_head') {
             this.state.processedNotes++;
@@ -425,9 +595,8 @@ const Game = {
             this.state.combo++;
             if (this.state.combo > this.state.maxCombo) this.state.maxCombo = this.state.combo;
             if (note.type === 'long_head') {
-                // 롱노트 헤드가 성공적으로 판정되면 수축 시작
+                // 롱노트 헤드 성공 → 수축 시작
                 note.shrinking = true;
-                note.shrinkStartTime = performance.now();
                 const tailNote = this.state.notes.find(n => n.noteId === note.noteId && n.type === 'long_tail');
                 if (tailNote) {
                     tailNote.headProcessed = true;
@@ -445,13 +614,11 @@ const Game = {
             }
             if (judgement === 'miss' && note.time > 0) {
                 if (note.type === 'tap' || note.type === 'false') {
-                    // tap끼리만 같은 타임 일괄 miss 처리
                     const notesAtSameTime = this.state.notes.filter(n =>
                         !n.processed && n.time === note.time && (n.type === 'tap' || n.type === 'false')
                     );
                     notesAtSameTime.forEach(n => this._processSingleJudgement('miss', n));
                 } else {
-                    // long_head / long_tail 은 개별 처리
                     this._processSingleJudgement('miss', note);
                 }
                 UI.showJudgementFeedback('MISS', 0);
@@ -486,11 +653,8 @@ const Game = {
 
     handleInputDown(laneIndex) {
         try {
-            // 카운트다운 중에는 입력 무시
-            if (this.state.gameState !== 'playing') {
-                return;
-            }
-            
+            if (this.state.gameState !== 'playing') return;
+
             this.state.activeLanes[laneIndex] = true;
             const laneEl = DOM.lanesContainer.children[laneIndex];
             if (laneEl) laneEl.classList.add('active-feedback');
@@ -502,9 +666,8 @@ const Game = {
                 elapsedTime = performance.now() - this.state.gameStartTime - this.state.totalPausedTime;
             }
 
-            // 원형 노트일 때 판정 윈도우 확장
             const isCircleMode = document.body.classList.contains('circle-notes');
-            const noteSize = isCircleMode ? 90 : 25; // 노트 높이
+            const noteSize = isCircleMode ? 90 : 25;
             const extraWindow = isCircleMode ? (noteSize / 2) * (10 / this.state.settings.noteSpeed) : 0;
             const judgementWindow = {
                 perfect: CONFIG.JUDGEMENT_WINDOWS_MS.perfect + extraWindow,
@@ -537,15 +700,11 @@ const Game = {
     },
 
     handleInputUp(laneIndex) {
-        // 시각적 피드백은 항상 제거
         this.state.activeLanes[laneIndex] = false;
         const laneEl = DOM.lanesContainer.children[laneIndex];
         if (laneEl) laneEl.classList.remove('active-feedback');
 
-        // 카운트다운 중에는 판정 무시
-        if (this.state.gameState !== 'playing') {
-            return;
-        }
+        if (this.state.gameState !== 'playing') return;
 
         let elapsedTime;
         if (this.state.settings.mode === 'music') {
@@ -554,7 +713,6 @@ const Game = {
             elapsedTime = performance.now() - this.state.gameStartTime - this.state.totalPausedTime;
         }
 
-        // 원형 노트일 때 판정 윈도우 확장
         const isCircleMode = document.body.classList.contains('circle-notes');
         const noteSize = isCircleMode ? 90 : 25;
         const extraWindow = isCircleMode ? (noteSize / 2) * (10 / this.state.settings.noteSpeed) : 0;
@@ -623,33 +781,36 @@ const Game = {
             UI.showScreen('menu');
             return;
         }
-        
-        // 레인 인덱스 → 레인 ID 매핑 저장
+
         this.state.laneIdMapping = keyOrder;
-        
+
         const keysForCurrentLanes = keyOrder.map(keyId => activeKeyMap[keyId]);
         this.state.keyMapping = keysForCurrentLanes.map(keyName => {
             const upperKeyName = keyName.charAt(0).toUpperCase() + keyName.slice(1);
             return CONFIG.KEY_CODES[upperKeyName] || keyName.toUpperCase().charCodeAt(0);
         });
         const keyHintMap = { 'Space': '⎵', 'Semicolon': ';' };
+
         for (let i = 0; i < laneCount; i++) {
             const lane = document.createElement('div');
             lane.className = 'lane';
             lane.style.width = '100px';
             lane.dataset.laneIndex = i;
-            lane.dataset.laneId = keyOrder[i]; // 레인 ID도 저장
+            lane.dataset.laneId = keyOrder[i];
+
+            // 키 힌트 (DOM 텍스트, Canvas 아님)
             const keyHint = document.createElement('div');
             keyHint.className = 'key-hint';
             const keyName = keysForCurrentLanes[i];
             keyHint.textContent = keyHintMap[keyName] || keyName.toUpperCase();
-            lane.appendChild(new DOMParser().parseFromString('<div class="judgement-line"></div>', "text/html").body.firstChild);
             lane.appendChild(keyHint);
-            lane.addEventListener('mousedown', (e) => { e.preventDefault(); this.handleInputDown(i); });
-            lane.addEventListener('mouseup', (e) => { e.preventDefault(); this.handleInputUp(i); });
+
+            // 이벤트: 클릭/터치 처리
+            lane.addEventListener('mousedown',  (e) => { e.preventDefault(); this.handleInputDown(i); });
+            lane.addEventListener('mouseup',    (e) => { e.preventDefault(); this.handleInputUp(i); });
             lane.addEventListener('mouseleave', (e) => { if (this.state.activeLanes[i]) this.handleInputUp(i); });
             lane.addEventListener('touchstart', (e) => { e.preventDefault(); this.handleInputDown(i); });
-            lane.addEventListener('touchend', (e) => { e.preventDefault(); this.handleInputUp(i); });
+            lane.addEventListener('touchend',   (e) => { e.preventDefault(); this.handleInputUp(i); });
             DOM.lanesContainer.appendChild(lane);
         }
     },
@@ -667,8 +828,7 @@ const Game = {
         let generatedNotesCount = 0;
         let currentTime = 1000;
         let noteIdCounter = 0;
-        
-        // 노트 타입 결정 함수 (동타용)
+
         const determineNoteType = () => {
             const rand = Math.random();
             const cumulative = {
@@ -676,21 +836,18 @@ const Game = {
                 long: dongtaTypeProbs.tap + dongtaTypeProbs.long,
                 false: dongtaTypeProbs.tap + dongtaTypeProbs.long + dongtaTypeProbs.false
             };
-            
             if (rand < cumulative.tap) return 'tap';
             if (rand < cumulative.long) return 'long';
             return 'false';
         };
-        
-        // 각 레인에서 롱노트가 활성화된 시간 추적
-        const activeLongNotes = new Map(); // lane -> endTime
-        
+
+        const activeLongNotes = new Map();
+
         while (generatedNotesCount < totalNotesToGenerate) {
             const remainingNotes = totalNotesToGenerate - generatedNotesCount;
             const canGenerateSimultaneous = this.state.settings.lanes > 1 && remainingNotes >= 2;
             const canGenerateLongNote = remainingNotes >= 1;
-            
-            // 현재 시간에 사용 가능한 레인 찾기 (롱노트가 진행 중이지 않은 레인)
+
             const getAvailableLanes = () => {
                 const available = [];
                 for (let i = 0; i < this.state.settings.lanes; i++) {
@@ -701,35 +858,23 @@ const Game = {
                 }
                 return available;
             };
-            
+
             if (canGenerateSimultaneous && Math.random() < simProbability) {
-                // 동시타 생성
                 const availableLanes = getAvailableLanes();
                 if (availableLanes.length < 2) {
-                    // 사용 가능한 레인이 부족하면 일반 노트 생성
                     const baseInterval = 500 - this.state.settings.lanes * CONFIG.NOTE_SPACING_FACTOR;
                     currentTime += baseInterval / this.state.settings.noteSpawnSpeed;
                     continue;
                 }
-                
-                const numSimultaneous = Math.min(
-                    maxSimultaneous,
-                    availableLanes.length,
-                    remainingNotes
-                );
+                const numSimultaneous = Math.min(maxSimultaneous, availableLanes.length, remainingNotes);
                 const actualCount = Math.max(2, Math.floor(Math.random() * (numSimultaneous - 1)) + 2);
-                
-                // 사용 가능한 레인 섞기
                 for (let i = availableLanes.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [availableLanes[i], availableLanes[j]] = [availableLanes[j], availableLanes[i]];
                 }
-                
-                // 동시타 노트 생성
                 for (let i = 0; i < actualCount && i < availableLanes.length; i++) {
                     const lane = availableLanes[i];
                     const noteType = determineNoteType();
-                    
                     if (noteType === 'long') {
                         const duration = 500 + Math.random() * 1000;
                         const noteId = noteIdCounter++;
@@ -740,18 +885,14 @@ const Game = {
                         this.state.notes.push({ lane, time: currentTime, type: noteType });
                     }
                 }
-                
                 generatedNotesCount += actualCount;
             } else if (canGenerateLongNote && Math.random() < longNoteProbability) {
-                // 일반 롱노트 (동타 아님)
                 const availableLanes = getAvailableLanes();
                 if (availableLanes.length === 0) {
-                    // 사용 가능한 레인이 없으면 건너뛰기
                     const baseInterval = 500 - this.state.settings.lanes * CONFIG.NOTE_SPACING_FACTOR;
                     currentTime += baseInterval / this.state.settings.noteSpawnSpeed;
                     continue;
                 }
-                
                 const lane = availableLanes[Math.floor(Math.random() * availableLanes.length)];
                 const duration = 500 + Math.random() * 1000;
                 const noteId = noteIdCounter++;
@@ -760,7 +901,6 @@ const Game = {
                 activeLongNotes.set(lane, currentTime + duration);
                 generatedNotesCount += 1;
             } else if (falseNoteProbability > 0 && Math.random() < falseNoteProbability) {
-                // 일반 가짜 노트
                 const availableLanes = getAvailableLanes();
                 if (availableLanes.length === 0) {
                     const baseInterval = 500 - this.state.settings.lanes * CONFIG.NOTE_SPACING_FACTOR;
@@ -771,7 +911,6 @@ const Game = {
                 this.state.notes.push({ lane, time: currentTime, type: 'false' });
                 generatedNotesCount++;
             } else {
-                // 일반 탭 노트
                 const availableLanes = getAvailableLanes();
                 if (availableLanes.length === 0) {
                     const baseInterval = 500 - this.state.settings.lanes * CONFIG.NOTE_SPACING_FACTOR;
@@ -782,7 +921,6 @@ const Game = {
                 this.state.notes.push({ lane, time: currentTime, type: 'tap' });
                 generatedNotesCount++;
             }
-            // 노트 생성 속도를 적용하여 시간 증가 (속도가 높을수록 간격이 짧아짐)
             const baseInterval = 500 - this.state.settings.lanes * CONFIG.NOTE_SPACING_FACTOR;
             currentTime += baseInterval / this.state.settings.noteSpawnSpeed;
         }
@@ -810,7 +948,7 @@ const Game = {
                 const laneId = note.lane;
                 const gameLaneIndex = requiredLaneIds.indexOf(laneId);
                 if (gameLaneIndex !== -1) {
-                    const newNoteBase = { time: note.time, lane: gameLaneIndex, processed: false, element: null };
+                    const newNoteBase = { time: note.time, lane: gameLaneIndex, processed: false };
                     const type = note.type || 'tap';
                     if (note.duration) {
                         const noteId = noteIdCounter++;
