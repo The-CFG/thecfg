@@ -520,7 +520,9 @@ const Game = {
                 const noteBottomY = jY - (timeToHit * this.state.settings.noteSpeed / 10);
 
                 // 아직 화면 밖(위)이고 처리 안됐으면 이후 노트도 마찬가지 → 중단
-                if (!note._visible && !note.processed && noteBottomY <= -noteH) {
+                // long_tail은 건너뜀: tail.time이 멀어도 그 뒤에 있는 다른 노트들은
+                // 실제로는 head보다 먼저 등장할 수 있으므로 break 판단에서 제외한다
+                if (note.type !== 'long_tail' && !note._visible && !note.processed && noteBottomY <= -noteH) {
                     break;
                 }
 
