@@ -80,6 +80,7 @@ const Editor = {
         try {
             this.state.history = [];
             this.state.notes = [];
+            this.state.triggers = [];
             this.state.bpm = 120;
             this.state.snapDivision = 4;
             this.state.startTimeOffset = 0;
